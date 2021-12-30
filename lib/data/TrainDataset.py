@@ -9,16 +9,20 @@ import torch
 from PIL.ImageFilter import GaussianBlur
 import trimesh
 import logging
+from inside_mesh import check_mesh_contains
+from tqdm import tqdm, trange
 
 log = logging.getLogger('trimesh')
 log.setLevel(40)
 
-def load_trimesh(root_dir):
-    folders = os.listdir(root_dir)
+def load_trimesh(root_dir, subjects):
+    # folders = os.listdir(root_dir)
     meshs = {}
-    for i, f in enumerate(folders):
+
+    # for i, f in tqdm(enumerate(folders)):
+    for i, f in tqdm(enumerate(subjects)):
         sub_name = f
-        meshs[sub_name] = trimesh.load(os.path.join(root_dir, f, '%s_100k.obj' % sub_name))
+        meshs[sub_name] = trimesh.load(os.path.join(root_dir, f, f'{sub_name}.obj' ))
 
     return meshs
 
@@ -67,8 +71,11 @@ class TrainDataset(Dataset):
         self.UV_POS = os.path.join(self.root, 'UV_POS')
         self.OBJ = os.path.join(self.root, 'GEO', 'OBJ')
 
-        self.B_MIN = np.array([-128, -28, -128])
-        self.B_MAX = np.array([128, 228, 128])
+        # self.B_MIN = np.array([-128, -28, -128])
+        # self.B_MAX = np.array([128, 228, 128])
+
+        self.B_MIN = np.array([-0.5, -0.5, -0.5])
+        self.B_MAX = np.array([0.5, 0.5, 0.5])
 
         self.is_train = (phase == 'train')
         self.load_size = self.opt.loadSize
@@ -78,7 +85,7 @@ class TrainDataset(Dataset):
         self.num_sample_inout = self.opt.num_sample_inout
         self.num_sample_color = self.opt.num_sample_color
 
-        self.yaw_list = list(range(0,360,1))
+        self.yaw_list = list(range(0,360,5))
         self.pitch_list = [0]
         self.subjects = self.get_subjects()
 
@@ -95,11 +102,19 @@ class TrainDataset(Dataset):
                                    hue=opt.aug_hue)
         ])
 
-        self.mesh_dic = load_trimesh(self.OBJ)
+        self.mesh_dic = load_trimesh(self.OBJ, self.subjects)
 
     def get_subjects(self):
         all_subjects = os.listdir(self.RENDER)
+
+        for i, sub in enumerate(all_subjects):
+            if '.DS' in sub:
+                all_subjects.pop(i)
+
+        all_subjects = all_subjects
+
         var_subjects = np.loadtxt(os.path.join(self.root, 'val.txt'), dtype=str)
+
         if len(var_subjects) == 0:
             return all_subjects
 
@@ -138,7 +153,7 @@ class TrainDataset(Dataset):
 
         for vid in view_ids:
             param_path = os.path.join(self.PARAM, subject, '%d_%d_%02d.npy' % (vid, pitch, 0))
-            render_path = os.path.join(self.RENDER, subject, '%d_%d_%02d.jpg' % (vid, pitch, 0))
+            render_path = os.path.join(self.RENDER, subject, '%d_%d_%02d.png' % (vid, pitch, 0))
             mask_path = os.path.join(self.MASK, subject, '%d_%d_%02d.png' % (vid, pitch, 0))
 
             # loading calibration data
@@ -249,26 +264,31 @@ class TrainDataset(Dataset):
             random.seed(1991)
             np.random.seed(1991)
             torch.manual_seed(1991)
+
         mesh = self.mesh_dic[subject]
         surface_points, _ = trimesh.sample.sample_surface(mesh, 4 * self.num_sample_inout)
         sample_points = surface_points + np.random.normal(scale=self.opt.sigma, size=surface_points.shape)
 
         # add random points within image space
+
+
+        # print(np.min(mesh.vertices[..., 0]), np.max(mesh.vertices[..., 0]))
+        # print(np.min(mesh.vertices[..., 1]), np.max(mesh.vertices[..., 1]))
+        # print(np.min(mesh.vertices[..., 2]), np.max(mesh.vertices[..., 2]))
+
         length = self.B_MAX - self.B_MIN
         random_points = np.random.rand(self.num_sample_inout // 4, 3) * length + self.B_MIN
         sample_points = np.concatenate([sample_points, random_points], 0)
         np.random.shuffle(sample_points)
 
-        inside = mesh.contains(sample_points)
+        # inside = mesh.contains(sample_points)
+        inside = check_mesh_contains(mesh, sample_points)
         inside_points = sample_points[inside]
         outside_points = sample_points[np.logical_not(inside)]
 
         nin = inside_points.shape[0]
-        inside_points = inside_points[
-                        :self.num_sample_inout // 2] if nin > self.num_sample_inout // 2 else inside_points
-        outside_points = outside_points[
-                         :self.num_sample_inout // 2] if nin > self.num_sample_inout // 2 else outside_points[
-                                                                                               :(self.num_sample_inout - nin)]
+        inside_points = inside_points[ :self.num_sample_inout // 2] if nin > self.num_sample_inout // 2 else inside_points
+        outside_points = outside_points[ :self.num_sample_inout // 2] if nin > self.num_sample_inout // 2 else outside_points[ :(self.num_sample_inout - nin)]
 
         samples = np.concatenate([inside_points, outside_points], 0).T
         labels = np.concatenate([np.ones((1, inside_points.shape[0])), np.zeros((1, outside_points.shape[0]))], 1)
@@ -278,14 +298,13 @@ class TrainDataset(Dataset):
 
         samples = torch.Tensor(samples).float()
         labels = torch.Tensor(labels).float()
-        
+
         del mesh
 
         return {
             'samples': samples,
             'labels': labels
         }
-
 
     def get_color_sampling(self, subject, yid, pid=0):
         yaw = self.yaw_list[yid]
@@ -367,7 +386,7 @@ class TrainDataset(Dataset):
         if self.opt.num_sample_inout:
             sample_data = self.select_sampling_method(subject)
             res.update(sample_data)
-        
+
         # img = np.uint8((np.transpose(render_data['img'][0].numpy(), (1, 2, 0)) * 0.5 + 0.5)[:, :, ::-1] * 255.0)
         # rot = render_data['calib'][0,:3, :3]
         # trans = render_data['calib'][0,:3, 3:4]
