@@ -51,7 +51,7 @@ def train(opt):
     optimizerG = torch.optim.RMSprop(netG.parameters(), lr=opt.learning_rate, momentum=0, weight_decay=0)
     lr = opt.learning_rate
     print('Using Network: ', netG.name)
-    
+
     def set_train():
         netG.train()
 
@@ -92,17 +92,19 @@ def train(opt):
 
             # retrieve the data
             image_tensor = train_data['img'].to(device=cuda)
+            peel_tensor = train_data['peel'].to(device=cuda)
             calib_tensor = train_data['calib'].to(device=cuda)
             sample_tensor = train_data['samples'].to(device=cuda)
 
-            image_tensor, calib_tensor = reshape_multiview_tensors(image_tensor, calib_tensor)
+            image_tensor, calib_tensor, peel_tensor = reshape_multiview_tensors(image_tensor, calib_tensor, peel_tensor)
 
             if opt.num_views > 1:
                 sample_tensor = reshape_sample_tensor(sample_tensor, opt.num_views)
 
             label_tensor = train_data['labels'].to(device=cuda)
 
-            res, error = netG.forward(image_tensor, sample_tensor, calib_tensor, labels=label_tensor)
+            input_tensor = torch.cat([image_tensor, peel_tensor], dim = 1)
+            res, error = netG.forward(input_tensor, sample_tensor, calib_tensor,  labels=label_tensor)
 
             optimizerG.zero_grad()
             error.backward()

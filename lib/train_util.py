@@ -7,11 +7,13 @@ import cv2
 from PIL import Image
 from tqdm import tqdm
 
-def reshape_multiview_tensors(image_tensor, calib_tensor):
+def reshape_multiview_tensors(image_tensor, calib_tensor, peel_tensor):
     # Careful here! Because we put single view and multiview together,
     # the returned tensor.shape is 5-dim: [B, num_views, C, W, H]
     # So we need to convert it back to 4-dim [B*num_views, C, W, H]
     # Don't worry classifier will handle multi-view cases
+
+
     image_tensor = image_tensor.view(
         image_tensor.shape[0] * image_tensor.shape[1],
         image_tensor.shape[2],
@@ -24,7 +26,14 @@ def reshape_multiview_tensors(image_tensor, calib_tensor):
         calib_tensor.shape[3]
     )
 
-    return image_tensor, calib_tensor
+    peel_tensor = peel_tensor.view(
+        peel_tensor.shape[0] * peel_tensor.shape[1],
+        peel_tensor.shape[2],
+        peel_tensor.shape[3],
+        peel_tensor.shape[4]
+    )
+
+    return image_tensor, calib_tensor, peel_tensor
 
 
 def reshape_sample_tensor(sample_tensor, num_views):
@@ -39,7 +48,6 @@ def reshape_sample_tensor(sample_tensor, num_views):
         sample_tensor.shape[3]
     )
     return sample_tensor
-
 
 def gen_mesh(opt, net, cuda, data, save_path, use_octree=True):
     image_tensor = data['img'].to(device=cuda)

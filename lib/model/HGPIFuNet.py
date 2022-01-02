@@ -123,10 +123,10 @@ class HGPIFuNet(BasePIFuNet):
         for preds in self.intermediate_preds_list:
             error += self.error_term(preds, self.labels)
         error /= len(self.intermediate_preds_list)
-        
+
         return error
 
-    def forward(self, images, points, calibs, transforms=None, labels=None):
+    def forward(self, images, points, calibs,  transforms=None, labels=None):
         # Get image feature
         self.filter(images)
 
@@ -135,7 +135,7 @@ class HGPIFuNet(BasePIFuNet):
 
         # get the prediction
         res = self.get_preds()
-        
+
         # get the error
         error = self.get_error()
 

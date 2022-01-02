@@ -64,7 +64,8 @@ class HGFilter(nn.Module):
         self.opt = opt
 
         # Base part
-        self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3)
+        first_inp_channel = 3 + self.opt.num_peel
+        self.conv1 = nn.Conv2d(first_inp_channel, 64, kernel_size=7, stride=2, padding=3)
 
         if self.opt.norm == 'batch':
             self.bn1 = nn.BatchNorm2d(64)
@@ -96,7 +97,7 @@ class HGFilter(nn.Module):
                 self.add_module('bn_end' + str(hg_module), nn.BatchNorm2d(256))
             elif self.opt.norm == 'group':
                 self.add_module('bn_end' + str(hg_module), nn.GroupNorm(32, 256))
-                
+
             self.add_module('l' + str(hg_module), nn.Conv2d(256,
                                                             opt.hourglass_dim, kernel_size=1, stride=1, padding=0))
 

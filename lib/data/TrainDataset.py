@@ -70,12 +70,15 @@ class TrainDataset(Dataset):
         self.UV_RENDER = os.path.join(self.root, 'UV_RENDER')
         self.UV_POS = os.path.join(self.root, 'UV_POS')
         self.OBJ = os.path.join(self.root, 'GEO', 'OBJ')
+        self.PEEL = os.path.join(self.root, 'PEELMAPS')
 
         # self.B_MIN = np.array([-128, -28, -128])
         # self.B_MAX = np.array([128, 228, 128])
 
         self.B_MIN = np.array([-0.5, -0.5, -0.5])
         self.B_MAX = np.array([0.5, 0.5, 0.5])
+        self.PEEL_MIN = 0
+        self.PEEL_MAX = 5000.864
 
         self.is_train = (phase == 'train')
         self.load_size = self.opt.loadSize
@@ -111,7 +114,7 @@ class TrainDataset(Dataset):
             if '.DS' in sub:
                 all_subjects.pop(i)
 
-        all_subjects = all_subjects
+        all_subjects = all_subjects[:2]
 
         var_subjects = np.loadtxt(os.path.join(self.root, 'val.txt'), dtype=str)
 
@@ -148,6 +151,7 @@ class TrainDataset(Dataset):
 
         calib_list = []
         render_list = []
+        peel_1_list = []
         mask_list = []
         extrinsic_list = []
 
@@ -186,11 +190,22 @@ class TrainDataset(Dataset):
             mask = Image.open(mask_path).convert('L')
             render = Image.open(render_path).convert('RGB')
 
+            # Loading Depth peel maps
+            peel_path = os.path.join(self.PEEL, subject, str(vid), 'dep1.npz')
+            peel_1 = np.load(peel_path)['a']
+
+            # Normalize the peel
+            peel_1 = (peel_1 - self.PEEL_MIN) / (self.PEEL_MAX - self.PEEL_MIN)
+            peel_1 = peel_1 * 255
+            peel_1 = Image.fromarray(peel_1)
+
+
             if self.is_train:
                 # Pad images
                 pad_size = int(0.1 * self.load_size)
                 render = ImageOps.expand(render, pad_size, fill=0)
                 mask = ImageOps.expand(mask, pad_size, fill=0)
+                peel_1 = ImageOps.expand(peel_1, pad_size, fill=0)
 
                 w, h = render.size
                 th, tw = self.load_size, self.load_size
@@ -200,6 +215,7 @@ class TrainDataset(Dataset):
                     scale_intrinsic[0, 0] *= -1
                     render = transforms.RandomHorizontalFlip(p=1.0)(render)
                     mask = transforms.RandomHorizontalFlip(p=1.0)(mask)
+                    peel_1 = transforms.RandomHorizontalFlip(p=1.0)(peel_1)
 
                 # random scale
                 if self.opt.random_scale:
@@ -208,6 +224,7 @@ class TrainDataset(Dataset):
                     h = int(rand_scale * h)
                     render = render.resize((w, h), Image.BILINEAR)
                     mask = mask.resize((w, h), Image.NEAREST)
+                    peel_1 = peel_1.resize((w, h), Image.NEAREST)
                     scale_intrinsic *= rand_scale
                     scale_intrinsic[3, 3] = 1
 
@@ -229,6 +246,7 @@ class TrainDataset(Dataset):
 
                 render = render.crop((x1, y1, x1 + tw, y1 + th))
                 mask = mask.crop((x1, y1, x1 + tw, y1 + th))
+                peel_1 = peel_1.crop((x1, y1, x1 + tw, y1 + th))
 
                 render = self.aug_trans(render)
 
@@ -240,6 +258,12 @@ class TrainDataset(Dataset):
             intrinsic = np.matmul(trans_intrinsic, np.matmul(uv_intrinsic, scale_intrinsic))
             calib = torch.Tensor(np.matmul(intrinsic, extrinsic)).float()
             extrinsic = torch.Tensor(extrinsic).float()
+
+            peel_1 = np.array(peel_1)
+            # Bring it to the boudning box range
+            peel_1 = peel_1 - self.B_MAX[..., -1]
+            peel_1 = torch.from_numpy(peel_1).float().unsqueeze(0)
+            peel_1_list.append(peel_1)
 
             mask = transforms.Resize(self.load_size)(mask)
             mask = transforms.ToTensor()(mask).float()
@@ -256,7 +280,8 @@ class TrainDataset(Dataset):
             'img': torch.stack(render_list, dim=0),
             'calib': torch.stack(calib_list, dim=0),
             'extrinsic': torch.stack(extrinsic_list, dim=0),
-            'mask': torch.stack(mask_list, dim=0)
+            'mask': torch.stack(mask_list, dim=0),
+            'peel': torch.stack(peel_1_list, dim=0),
         }
 
     def select_sampling_method(self, subject):

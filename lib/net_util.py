@@ -13,7 +13,7 @@ from PIL import Image
 from tqdm import tqdm
 
 
-def reshape_multiview_tensors(image_tensor, calib_tensor):
+def reshape_multiview_tensors(image_tensor, calib_tensor, peel_tensor):
     # Careful here! Because we put single view and multiview together,
     # the returned tensor.shape is 5-dim: [B, num_views, C, W, H]
     # So we need to convert it back to 4-dim [B*num_views, C, W, H]
@@ -29,8 +29,13 @@ def reshape_multiview_tensors(image_tensor, calib_tensor):
         calib_tensor.shape[2],
         calib_tensor.shape[3]
     )
+    peel_tensor = peel_tensor.view(
+        peel_tensor.shape[0] * peel_tensor.shape[1],
+        peel_tensor.shape[2],
+        peel_tensor.shape[3]
+    )
 
-    return image_tensor, calib_tensor
+    return image_tensor, calib_tensor, peel_tensor
 
 
 def reshape_sample_tensor(sample_tensor, num_views):
@@ -359,7 +364,7 @@ class ConvBlock(nn.Module):
             self.bn2 = nn.GroupNorm(32, int(out_planes / 2))
             self.bn3 = nn.GroupNorm(32, int(out_planes / 4))
             self.bn4 = nn.GroupNorm(32, in_planes)
-        
+
         if in_planes != out_planes:
             self.downsample = nn.Sequential(
                 self.bn4,
@@ -393,4 +398,4 @@ class ConvBlock(nn.Module):
         out3 += residual
 
         return out3
-  
+

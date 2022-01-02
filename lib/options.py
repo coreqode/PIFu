@@ -76,6 +76,7 @@ class BaseOptions():
         g_model.add_argument('--skip_hourglass', action='store_true', help='skip connection in hourglass')
         g_model.add_argument('--hg_down', type=str, default='ave_pool', help='ave pool || conv64 || conv128')
         g_model.add_argument('--hourglass_dim', type=int, default='256', help='256 | 512')
+        g_model.add_argument('--num_peel', type=int, default=0, help='1 - 4')
 
         # Classification General
         g_model.add_argument('--mlp_dim', nargs='+', default=[257, 1024, 512, 256, 128, 1], type=int,
