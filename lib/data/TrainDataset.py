@@ -114,7 +114,7 @@ class TrainDataset(Dataset):
             if '.DS' in sub:
                 all_subjects.pop(i)
 
-        all_subjects = all_subjects[:2]
+        all_subjects = all_subjects
 
         var_subjects = np.loadtxt(os.path.join(self.root, 'val.txt'), dtype=str)
 
@@ -259,9 +259,10 @@ class TrainDataset(Dataset):
             calib = torch.Tensor(np.matmul(intrinsic, extrinsic)).float()
             extrinsic = torch.Tensor(extrinsic).float()
 
-            peel_1 = np.array(peel_1)
+            peel_1 = np.array(peel_1) / 255
             # Bring it to the boudning box range
             peel_1 = peel_1 - self.B_MAX[..., -1]
+
             peel_1 = torch.from_numpy(peel_1).float().unsqueeze(0)
             peel_1_list.append(peel_1)
 
@@ -271,6 +272,7 @@ class TrainDataset(Dataset):
 
             render = self.to_tensor(render)
             render = mask.expand_as(render) * render
+            render = torch.cat([render, peel_1], dim = 0)
 
             render_list.append(render)
             calib_list.append(calib)
@@ -281,7 +283,6 @@ class TrainDataset(Dataset):
             'calib': torch.stack(calib_list, dim=0),
             'extrinsic': torch.stack(extrinsic_list, dim=0),
             'mask': torch.stack(mask_list, dim=0),
-            'peel': torch.stack(peel_1_list, dim=0),
         }
 
     def select_sampling_method(self, subject):

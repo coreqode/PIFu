@@ -7,7 +7,7 @@ import cv2
 from PIL import Image
 from tqdm import tqdm
 
-def reshape_multiview_tensors(image_tensor, calib_tensor, peel_tensor):
+def reshape_multiview_tensors(image_tensor, calib_tensor):
     # Careful here! Because we put single view and multiview together,
     # the returned tensor.shape is 5-dim: [B, num_views, C, W, H]
     # So we need to convert it back to 4-dim [B*num_views, C, W, H]
@@ -26,14 +26,14 @@ def reshape_multiview_tensors(image_tensor, calib_tensor, peel_tensor):
         calib_tensor.shape[3]
     )
 
-    peel_tensor = peel_tensor.view(
-        peel_tensor.shape[0] * peel_tensor.shape[1],
-        peel_tensor.shape[2],
-        peel_tensor.shape[3],
-        peel_tensor.shape[4]
-    )
+    # peel_tensor = peel_tensor.view(
+    #     peel_tensor.shape[0] * peel_tensor.shape[1],
+    #     peel_tensor.shape[2],
+    #     peel_tensor.shape[3],
+    #     peel_tensor.shape[4]
+    # )
 
-    return image_tensor, calib_tensor, peel_tensor
+    return image_tensor, calib_tensor
 
 
 def reshape_sample_tensor(sample_tensor, num_views):
@@ -61,7 +61,10 @@ def gen_mesh(opt, net, cuda, data, save_path, use_octree=True):
         save_img_path = save_path[:-4] + '.png'
         save_img_list = []
         for v in range(image_tensor.shape[0]):
-            save_img = (np.transpose(image_tensor[v].detach().cpu().numpy(), (1, 2, 0)) * 0.5 + 0.5)[:, :, ::-1] * 255.0
+            if image_tensor.shape[1] == 4:
+                save_img = (np.transpose(image_tensor[v][:3].detach().cpu().numpy(), (1, 2, 0)) * 0.5 + 0.5)[:, :, ::-1] * 255.0
+            else:
+                save_img = (np.transpose(image_tensor[v].detach().cpu().numpy(), (1, 2, 0)) * 0.5 + 0.5)[:, :, ::-1] * 255.0
             save_img_list.append(save_img)
         save_img = np.concatenate(save_img_list, axis=1)
         Image.fromarray(np.uint8(save_img[:,:,::-1])).save(save_img_path)
