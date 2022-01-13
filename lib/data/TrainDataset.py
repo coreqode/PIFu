@@ -18,6 +18,7 @@ log.setLevel(40)
 def load_trimesh(root_dir, subjects):
     # folders = os.listdir(root_dir)
     meshs = {}
+    print(subjects)
 
     # for i, f in tqdm(enumerate(folders)):
     for i, f in tqdm(enumerate(subjects)):
@@ -77,7 +78,7 @@ class TrainDataset(Dataset):
 
         self.B_MIN = np.array([-0.5, -0.5, -0.5])
         self.B_MAX = np.array([0.5, 0.5, 0.5])
-        self.PEEL_MIN = 0
+        self.PEEL_MIN = 4999.1074
         self.PEEL_MAX = 5000.864
 
         self.is_train = (phase == 'train')
@@ -110,11 +111,7 @@ class TrainDataset(Dataset):
     def get_subjects(self):
         all_subjects = os.listdir(self.RENDER)
 
-        for i, sub in enumerate(all_subjects):
-            if '.DS' in sub:
-                all_subjects.pop(i)
-
-        all_subjects = all_subjects
+        all_subjects = all_subjects[:2]
 
         var_subjects = np.loadtxt(os.path.join(self.root, 'val.txt'), dtype=str)
 
@@ -141,11 +138,13 @@ class TrainDataset(Dataset):
             'extrinsic': [num_views, 4, 4] extrinsic matrix
             'mask': [num_views, 1, W, H] masks
         '''
+
         pitch = self.pitch_list[pid]
 
         # The ids are an even distribution of num_views around view_id
         view_ids = [self.yaw_list[(yid + len(self.yaw_list) // num_views * offset) % len(self.yaw_list)]
                     for offset in range(num_views)]
+
         if random_sample:
             view_ids = np.random.choice(self.yaw_list, num_views, replace=False)
 
@@ -155,6 +154,8 @@ class TrainDataset(Dataset):
         mask_list = []
         extrinsic_list = []
 
+        ##### Only for debugging
+        view_ids  = [0]
         for vid in view_ids:
             param_path = os.path.join(self.PARAM, subject, '%d_%d_%02d.npy' % (vid, pitch, 0))
             render_path = os.path.join(self.RENDER, subject, '%d_%d_%02d.png' % (vid, pitch, 0))
@@ -174,16 +175,19 @@ class TrainDataset(Dataset):
             translate = -np.matmul(R, center).reshape(3, 1)
             extrinsic = np.concatenate([R, translate], axis=1)
             extrinsic = np.concatenate([extrinsic, np.array([0, 0, 0, 1]).reshape(1, 4)], 0)
+
             # Match camera space to image pixel space
             scale_intrinsic = np.identity(4)
             scale_intrinsic[0, 0] = scale / ortho_ratio
             scale_intrinsic[1, 1] = -scale / ortho_ratio
             scale_intrinsic[2, 2] = scale / ortho_ratio
+
             # Match image pixel space to image uv space
             uv_intrinsic = np.identity(4)
             uv_intrinsic[0, 0] = 1.0 / float(self.opt.loadSize // 2)
             uv_intrinsic[1, 1] = 1.0 / float(self.opt.loadSize // 2)
             uv_intrinsic[2, 2] = 1.0 / float(self.opt.loadSize // 2)
+
             # Transform under image pixel space
             trans_intrinsic = np.identity(4)
 
@@ -191,21 +195,27 @@ class TrainDataset(Dataset):
             render = Image.open(render_path).convert('RGB')
 
             # Loading Depth peel maps
-            peel_path = os.path.join(self.PEEL, subject, str(vid), 'dep1.npz')
-            peel_1 = np.load(peel_path)['a']
+            peel = np.zeros((4, mask.size[0], mask.size[1]))
+            for ind, dep in enumerate(['dep1', 'dep2', 'dep3', 'dep4']):
+                peel_path = os.path.join(self.PEEL, subject, str(vid), f'{dep}.npz')
+                peel[ind] = np.load(peel_path)['a']
 
             # Normalize the peel
-            peel_1 = (peel_1 - self.PEEL_MIN) / (self.PEEL_MAX - self.PEEL_MIN)
-            peel_1 = peel_1 * 255
-            peel_1 = Image.fromarray(peel_1)
+            peel = (peel - self.PEEL_MIN) / (self.PEEL_MAX - self.PEEL_MIN)
 
+            peel = peel * 255
+            peel = peel.tolist()
 
             if self.is_train:
                 # Pad images
                 pad_size = int(0.1 * self.load_size)
                 render = ImageOps.expand(render, pad_size, fill=0)
                 mask = ImageOps.expand(mask, pad_size, fill=0)
-                peel_1 = ImageOps.expand(peel_1, pad_size, fill=0)
+
+                for peel_idx, p in enumerate(peel):
+                    p = np.array(p)
+                    p = Image.fromarray(p)
+                    peel[peel_idx] = ImageOps.expand(p, pad_size, fill=0)
 
                 w, h = render.size
                 th, tw = self.load_size, self.load_size
@@ -215,7 +225,9 @@ class TrainDataset(Dataset):
                     scale_intrinsic[0, 0] *= -1
                     render = transforms.RandomHorizontalFlip(p=1.0)(render)
                     mask = transforms.RandomHorizontalFlip(p=1.0)(mask)
-                    peel_1 = transforms.RandomHorizontalFlip(p=1.0)(peel_1)
+
+                    for peel_idx, p in enumerate(peel):
+                        peel[peel_idx] = transforms.RandomHorizontalFlip(p=1.0)(p)
 
                 # random scale
                 if self.opt.random_scale:
@@ -224,16 +236,16 @@ class TrainDataset(Dataset):
                     h = int(rand_scale * h)
                     render = render.resize((w, h), Image.BILINEAR)
                     mask = mask.resize((w, h), Image.NEAREST)
-                    peel_1 = peel_1.resize((w, h), Image.NEAREST)
+                    for peel_idx, p in enumerate(peel):
+                        peel[peel_idx] = p.resize((w, h), Image.NEAREST)
+
                     scale_intrinsic *= rand_scale
                     scale_intrinsic[3, 3] = 1
 
                 # random translate in the pixel space
                 if self.opt.random_trans:
-                    dx = random.randint(-int(round((w - tw) / 10.)),
-                                        int(round((w - tw) / 10.)))
-                    dy = random.randint(-int(round((h - th) / 10.)),
-                                        int(round((h - th) / 10.)))
+                    dx = random.randint(-int(round((w - tw) / 10.)), int(round((w - tw) / 10.)))
+                    dy = random.randint(-int(round((h - th) / 10.)), int(round((h - th) / 10.)))
                 else:
                     dx = 0
                     dy = 0
@@ -246,7 +258,9 @@ class TrainDataset(Dataset):
 
                 render = render.crop((x1, y1, x1 + tw, y1 + th))
                 mask = mask.crop((x1, y1, x1 + tw, y1 + th))
-                peel_1 = peel_1.crop((x1, y1, x1 + tw, y1 + th))
+
+                for peel_idx, p in enumerate(peel):
+                    peel[peel_idx] = p.crop((x1, y1, x1 + tw, y1 + th))
 
                 render = self.aug_trans(render)
 
@@ -259,12 +273,25 @@ class TrainDataset(Dataset):
             calib = torch.Tensor(np.matmul(intrinsic, extrinsic)).float()
             extrinsic = torch.Tensor(extrinsic).float()
 
-            peel_1 = np.array(peel_1) / 255
-            # Bring it to the boudning box range
-            peel_1 = peel_1 - self.B_MAX[..., -1]
+            for peel_idx, p in enumerate(peel):
+                peel[peel_idx] = np.array(p)
 
-            peel_1 = torch.from_numpy(peel_1).float().unsqueeze(0)
-            peel_1_list.append(peel_1)
+
+            ## For Debugging
+            # render = np.array(render)
+            # peel = np.array(peel)
+            # peel = np.expand_dims(peel, axis = -1)
+            # x = np.concatenate([render, peel], axis = -1)
+            # np.save('./check_new.npy', x)
+            # import sys; sys.exit()
+
+            peel = np.array(peel)  / 255 ## Shape (4, 512, 512)
+            # Bring it to the boudning box range
+            peel = peel - self.B_MAX[..., -1]
+
+            peel_list = []
+            peel = torch.from_numpy(peel).float()
+            peel_list.append(peel)
 
             mask = transforms.Resize(self.load_size)(mask)
             mask = transforms.ToTensor()(mask).float()
@@ -272,7 +299,7 @@ class TrainDataset(Dataset):
 
             render = self.to_tensor(render)
             render = mask.expand_as(render) * render
-            render = torch.cat([render, peel_1], dim = 0)
+            render = torch.cat([render, peel], dim = 0)
 
             render_list.append(render)
             calib_list.append(calib)
@@ -405,6 +432,7 @@ class TrainDataset(Dataset):
             'b_min': self.B_MIN,
             'b_max': self.B_MAX,
         }
+
         render_data = self.get_render(subject, num_views=self.num_views, yid=yid, pid=pid,
                                         random_sample=self.opt.random_multiview)
         res.update(render_data)

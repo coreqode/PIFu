@@ -1,0 +1,14 @@
++++++++++++++++++++++++++++++++++++
+Date:  Thu Jan 13 17:58:08 IST 2022
+GPU IDs:  0
+Experiment name: 
+Allocated: 
++++++++++++++++++++++++++++++++++++
+Traceback (most recent call last):
+  File "/usr/lib/python2.7/runpy.py", line 174, in _run_module_as_main
+    "__main__", fname, loader, pkg_name)
+  File "/usr/lib/python2.7/runpy.py", line 72, in _run_code
+    exec code in run_globals
+  File "/home2/coreqode/PIFu/apps/train_shape.py", line 10, in <module>
+    import cv2
+ImportError: No module named cv2
